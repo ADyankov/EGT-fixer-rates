@@ -18,6 +18,7 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
@@ -81,7 +82,7 @@ public class FixerClientImpl implements FixerClient {
                     exRate.setBase(response.getBase());
                     exRate.setRate(value.toString());
                     exRate.setQuote(key);
-                    exRate.setTimestamp(LocalDateTime.ofInstant(Instant.ofEpochSecond(response.getTimestamp()), TimeZone.getDefault().toZoneId()));
+                    exRate.setTimestamp(LocalDateTime.ofInstant(Instant.ofEpochSecond(response.getTimestamp()), TimeZone.getTimeZone(ZoneOffset.UTC).toZoneId()));
                     saveRateData(exRate);
                 });
     }

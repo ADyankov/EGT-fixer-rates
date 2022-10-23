@@ -4,7 +4,7 @@ import javax.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "history_exchange_rate_data", schema = "exchange_rates")
+@Table(name = "history_exchange_rate_data")
 @IdClass(HistoryExchangeRateId.class)
 public class HistoryExchangeRateEntity {
 

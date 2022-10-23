@@ -3,7 +3,7 @@ package com.collector.rates.entity;
 import javax.persistence.*;
 import java.time.LocalDateTime;
 
-@Table(name = "exchange_rate_data", schema = "exchange_rates")
+@Table(name = "exchange_rate_data")
 @Entity
 @IdClass(ExchangeRateId.class)
 public class ExchangeRateEntity {
