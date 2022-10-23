@@ -3,9 +3,9 @@ package com.collector.rates.service;
 import com.collector.rates.config.ConfigurationResolver;
 import com.collector.rates.entity.ExchangeRateEntity;
 import com.collector.rates.entity.HistoryExchangeRateEntity;
+import com.collector.rates.model.FixerResponse;
 import com.collector.rates.repository.ExchangeRateRepository;
 import com.collector.rates.repository.HistoryExchangeRateRepository;
-import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -13,12 +13,12 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Arrays;
-import java.util.Iterator;
 import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,20 +44,22 @@ public class FixerClientImpl implements FixerClient {
         this.configurationResolver = configurationResolver;
     }
 
-    @Scheduled(fixedRate = 60000)
+    @Scheduled(fixedDelayString = "${rates.poll.rate}")
     public void syncLatestRatesByCurrency() {
         HttpEntity<Void> requestEntity = buildHttpEntity();
         String[] bases = configurationResolver.getBaseCurrencies().split(",");
-        int threads = Runtime.getRuntime().availableProcessors();
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        ExecutorService pool = Executors.newFixedThreadPool(128);
 
-        Arrays.stream(bases).forEach(base ->
-                pool.execute(() -> {
-                            ResponseEntity<String> response = restTemplate.exchange(FIXER_URL + base, HttpMethod.GET, requestEntity, String.class);
-                            JSONObject responseJson = new JSONObject(response.getBody());
-                            buildExchangeRateRecordFromJson(base, responseJson);
-                        }
-                ));
+        Arrays.stream(bases).map(String::trim)
+                .filter(b -> b.length() > 0)
+                .forEach(base ->
+                        pool.execute(() -> {
+                                    ResponseEntity<FixerResponse> response = restTemplate.exchange(FIXER_URL + base, HttpMethod.GET, requestEntity, FixerResponse.class);
+                                    if (response.getBody() != null) {
+                                        saveRates(response.getBody());
+                                    }
+                                }
+                        ));
     }
 
     private HttpEntity<Void> buildHttpEntity() {
@@ -66,23 +68,21 @@ public class FixerClientImpl implements FixerClient {
         return new HttpEntity<>(headers);
     }
 
-    private void buildExchangeRateRecordFromJson(String base, JSONObject exchangeData) {
-        JSONObject ratesJson = exchangeData.getJSONObject("rates");
-        String longTimestamp = exchangeData.get("timestamp").toString();
-        long ts = Long.parseLong(longTimestamp);
-        Iterator<String> keys = ratesJson.keys();
+    @Transactional
+    private void saveRateData(ExchangeRateEntity exRate) {
+        exchangeRateRepository.save(exRate);
+        historyRepository.save(new HistoryExchangeRateEntity(exRate));
+    }
 
-        while (keys.hasNext()) {
-            String quote = keys.next();
-            String rate = ratesJson.get(quote).toString();
-            ExchangeRateEntity exRate = new ExchangeRateEntity();
-            exRate.setBase(base);
-            exRate.setQuote(quote);
-            exRate.setRate(rate);
-            LocalDateTime timestamp = LocalDateTime.ofInstant(Instant.ofEpochSecond(ts), TimeZone.getDefault().toZoneId());
-            exRate.setTimestamp(timestamp);
-            exchangeRateRepository.save(exRate);
-            historyRepository.save(new HistoryExchangeRateEntity(exRate));
-        }
+    private void saveRates(FixerResponse response) {
+        response.getRates()
+                .forEach((key, value) -> {
+                    ExchangeRateEntity exRate = new ExchangeRateEntity();
+                    exRate.setBase(response.getBase());
+                    exRate.setRate(value.toString());
+                    exRate.setQuote(key);
+                    exRate.setTimestamp(LocalDateTime.ofInstant(Instant.ofEpochSecond(response.getTimestamp()), TimeZone.getDefault().toZoneId()));
+                    saveRateData(exRate);
+                });
     }
 }
